@@ -159,7 +159,7 @@ class CacheLine:
 class Cache:
     #TODO: Add victim caches, 
 
-    def __init__(self, name, set_width, way_width, line_size_width, replacement_policy = ReplacementPolicy.LRU, write_back = True, write_allocate = True, load_from = None, store_to = None, address_width = 32):
+    def __init__(self, name, set_width, way_width, line_size_width, replacement_policy = ReplacementPolicy.LRU, write_back = True, write_allocate = True, load_from = None, store_to = None, victim = None, address_width = 32):
         self.replacement_policy = replacement_policy
         self.set_width = set_width #number of distinct sets of blocks. 1 set means fully associative
         self.way_width = way_width #number of blocks per set. 1 way means directly mapped
@@ -168,6 +168,7 @@ class Cache:
         self.write_allocate = write_allocate
         self.load_from = load_from
         self.store_to = store_to
+        self.victim = victim
         self.address_width = address_width
 
         self.name = name
@@ -198,8 +199,11 @@ class Cache:
             
             print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyfail + " Tag %d not in %s" % (candidate_tag, self.name))
 
-            #TODO first check if the evicted tag gonna be dirtied and push it up, THEN pull down new data
+            #first check if the evicted tag gonna be dirtied and push it up, THEN pull down new data
             outgoing = candidate_set.allocate_for(candidate_tag)
+            #TODO check if there is a victim cache, because in that case this block goes there
+            #Now if the victim is full, it will need to push a block higher unless it contains the 
+            #requested block
             if outgoing.valid and outgoing.dirty:
                 #TODO push up to higher memory to save (should always be present as it is coherent)
                 outgoing_base_addr = ((outgoing.tag << self.set_width) + candidate_tag) << self.line_size_width
@@ -210,6 +214,7 @@ class Cache:
             #TODO request also to victim cache if present
             #if data is not present, request it to higher levels of cache. If it can't get it, bad
             if not self.load_from.read_address(addr):
+                print("An address was requested to a memory that does not have it nor does it have a higher order memory connected")
                 return False
 
             candidate_set.put(candidate_tag)
@@ -271,7 +276,8 @@ def main():
     way_width = 1 # 2 ways
 
     mem = MainMemory(address_width = address_width, line_size_width = line_size_width)
-    cache = Cache("L1", set_width, way_width, line_size_width = line_size_width, replacement_policy = ReplacementPolicy.LRU, load_from = mem, store_to = mem, address_width = address_width)
+    victim = Cache("L1-Victim", 1, 4, line_size_width = line_size_width, replacement_policy = ReplacementPolicy.LRU, load_from = None, store_to = mem, address_width = address_width)
+    cache = Cache("L1", set_width, way_width, line_size_width = line_size_width, replacement_policy = ReplacementPolicy.LRU, load_from = mem, store_to = mem, victim = victim, address_width = address_width)
 
     """for i in range(1000):
         if np.random.randint(2) > 0:
@@ -302,7 +308,16 @@ TODOS:
     Pretty print cache structure with what's inside and such
     Add timing statistics somewhere
     Add victim cache
+        Cache Hit: No action
+        Cache Miss, Victim Hit: The block is in the victim cache and the one in the cache are replaced with each other. This new entry in victim cache becomes the most recently used block.
+        Cache Miss, Victim Miss: The block is brought to cache from next level. The block evicted from the cache gets stored in Victim cache
+            The block evicted from the Victim, if existent and dirty, is written to next level
 """
 
 #todo estabas haciendo que el cacheset tenga un array de tamaño fijo para las vías!!! (así se imprime siempre todo)
 #habrá que cambiar los algoritmos de reemplazo para que busquen Nones
+
+
+#curiosear ripes para simulador
+
+#todo victim cache
