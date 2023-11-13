@@ -29,9 +29,6 @@ prettyleft = Fore.YELLOW + "←" + Style.RESET_ALL
 prettyup = Fore.BLUE + "↑" + Style.RESET_ALL
 prettydown = Fore.BLUE + "↓" + Style.RESET_ALL
 
-def unimperror():
-    raise NotImplementedError
-
 
 
 
@@ -53,10 +50,19 @@ class CacheLine:
 
 class CacheStatistics:
     def __init__(self):
-        self.hits = 0
-        self.misses = 0
-        self.reads = 0
-        self.writes = 0
+        self.read_hit = 0
+        self.read_miss = 0
+
+        self.write_hit = 0
+        self.write_miss = 0
+        self.write_through = 0
+
+    def get_statistics(self):
+        total_reads = self.read_hit + self.read_miss
+        hitrate_read = float(self.read_hit) / float(total_reads) * 100.0 if total_reads > 0 else 0
+        total_writes = self.write_hit + self.write_miss
+        hitrate_write = float(self.write_hit) / float(total_writes) * 100.0 if total_writes > 0 else 0
+        return "Reads: [%d/%d](%.2f) Writes: [%d/%d](%.2f) WT[[%d]]" % (self.read_hit, total_reads, hitrate_read, self.write_hit, total_writes, hitrate_write, self.write_through)
 
 
 class MainMemory:
@@ -65,20 +71,26 @@ class MainMemory:
         self.name = name
         self.address_width = address_width
         self.line_size_width = line_size_width
+        self.statistics = CacheStatistics()
 
     def get_block(self, addr):
         return addr >> self.line_size_width
 
     def read(self, addr):
+        self.statistics.read_hit += 1
         print(prettydir(addr, self.address_width, 0, self.line_size_width) + " " + prettydown +  (" Block %s read from main memory" % str(self.get_block(addr))))
         return True
 
     def write(self, addr):
+        self.statistics.write_hit += 1
         print(prettydir(addr, self.address_width, 0, self.line_size_width) + " " + prettyup + (" Block %s written to main memory" % str(self.get_block(addr))))
         return True
 
     def write_line(self, line):
         return self.write(line.addr)
+
+    def show_statistics(self):
+        print(self.name + self.statistics.get_statistics())
 
 
 class Cache:
@@ -137,22 +149,41 @@ class Cache:
         
 
     def read(self, addr):
+        if addr in self:
+            self.statistics.read_hit += 1
+        else:
+            self.statistics.read_miss += 1
         self.get(addr)
-        self.statistics.reads += 1
         self._update(addr) #update LRU, etc
 
     def write(self, addr):
-        self.get(addr)
-        self._update(addr, dirty=True) #update LRU, etc
+        #allocate space before updating
+        if self.write_allocate:
+            if addr in self:
+                self.statistics.write_hit += 1
+            else:
+                self.statistics.write_miss += 1
+
+            self.get(addr)
+            self._update(addr, dirty=True) #update LRU, etc
+        else: 
+            #if the block is here, write it
+            if addr in self:
+                self.statistics.write_hit += 1
+                self.get(addr)
+                self._update(addr, dirty=True) #update LRU, etc
+            #if not, write next level
+            else:
+                self.statistics.write_through += 1
+                self.store_to.write(addr)
+
 
     #gets an address for this cache. Internal statistics are updated, and data is brought if needed
     def get(self, addr):
         if addr in self: #Data found!
-            self.statistics.hits += 1 
             print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettytick + " Tag %d in %s" % (self.get_tag(addr), self.name))
             return True
         else: #data not found
-
             if self.victim:
                 if addr in self.victim: #data found in victim
                     print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettytick + " Tag %d in %s" % (self.get_tag(addr), self.victim.name))
@@ -286,7 +317,9 @@ class Cache:
             return "\n".join(setstr)
 
 
-
+    def show_statistics(self):
+        print(self.name + self.statistics.get_statistics())
+        self.load_from.show_statistics()
 
 
 def main():
@@ -313,4 +346,49 @@ def main():
 
 
 
-main()
+def ej1():
+    """
+    #define N 128
+    int A[N][N];
+    int B[N][N];
+    int C[N][N];
+
+    for (i=0; i < N; i++)
+        for (j=0; j < N; j++)
+            C[i][j] = A[i][j] + B[i][j];
+    """
+    #address_width, line_size_width, set_width, way_width, policy, write_back, write_allocate = 32, 8, 7, 0, ReplacementPolicy.LRU, True, True
+    address_width, line_size_width, set_width, way_width, policy, write_back, write_allocate = 32, 8, 6, 1, ReplacementPolicy.LRU, True, False
+    mem = MainMemory(address_width = address_width, line_size_width = line_size_width, name = "Memory")
+    cache = Cache("Cache", set_width, way_width, line_size_width = line_size_width, replacement_policy = policy, write_back = write_back, write_allocate = write_allocate, load_from = mem, store_to = mem, victim = None, address_width = address_width)
+
+    A_addr = 0x0c000000
+    B_addr = A_addr + 128*128*4
+    C_addr = B_addr + 128*128*4
+    N = 128
+    for i in range(128):
+        for j in range(128):
+            cache.read(B_addr+i*128*4+j*4)
+            cache.read(A_addr+i*128*4+j*4)
+            cache.write(C_addr+i*128*4+j*4)
+
+
+    print(cache)
+
+    cache.show_statistics()
+
+ej1()
+
+
+
+"""
+    write_allocate: reserves memory when writing (brings block)
+    no write_allocate: does not reserve memory if the block is not in cache (just writes to upper memory)
+
+    TODO:
+    write_back: only write a block when evicted
+    write_through: writes all the hierarchy when dirty, no waiting for eviction
+
+    TODO:
+    differentiate between line read/writes and word read/writes since it is different!!!
+"""
