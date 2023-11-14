@@ -30,6 +30,6 @@ Or you can also run it with a script
 
 As an example, let's see the output of running the previous command, with the script `ejesp3.chs`
 
-![Screenshot after running `python3 cacheasy.py "run_script ejesp3.chs`.](https://github.com/Daniel-BG/cacheasy/res/example.png)
+![Screenshot after running `python3 cacheasy.py "run_script ejesp3.chs`.](https://github.com/Daniel-BG/cacheasy/blob/master/res/example.png)
 
 The simulator outputs a log of the different types of operations (accesses, misses, block transfers...) after each request (`read`/`write`) to the memory system. To see the statistics at any time, you can run the `show_state` command which will print information about the addresses contained in the cache, as well as its metrics.
