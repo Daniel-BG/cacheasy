@@ -23,3 +23,4 @@ read 0x03345FE
 read 0x34345AC
 read 0x214BFAA    
 read 0x014BF54
+show_state
