@@ -5,7 +5,7 @@ rng = np.random.default_rng()
 
 ReplacementPolicy = Enum('ReplacementPolicy', ['FIFO', 'LRU', 'MRU', 'RANDOM'])
 
-from colorama import Fore, Style
+from colorama import Fore, Back, Style
 def prettydir(addr, totalbits, setbits, bytebits, brackets=True, tagcol = Fore.RED):
     #calculate the toal amount of bits
     blockbits = totalbits - setbits - bytebits
@@ -30,6 +30,16 @@ prettyupyellow = Fore.YELLOW + "↑" + Style.RESET_ALL
 prettydown = Fore.BLUE + "↓" + Style.RESET_ALL
 prettydowndown = Fore.BLUE + "⯯" + Style.RESET_ALL
 prettyswap = Fore.YELLOW + "⇆" + Style.RESET_ALL
+
+"""prettytick = Fore.GREEN + "o" + Style.RESET_ALL
+prettyfail = Fore.RED + "x" + Style.RESET_ALL
+prettyright = Fore.YELLOW + ">" + Style.RESET_ALL
+prettyleft = Fore.YELLOW + "<" + Style.RESET_ALL
+prettyup = Fore.BLUE + "^" + Style.RESET_ALL
+prettyupyellow = Fore.YELLOW + "^" + Style.RESET_ALL
+prettydown = Fore.BLUE + "v" + Style.RESET_ALL
+prettydowndown = Fore.BLUE + "vv" + Style.RESET_ALL
+prettyswap = Fore.YELLOW + "<>" + Style.RESET_ALL"""
 
 
 def bits_to_power(bits, unit):
@@ -104,6 +114,7 @@ class MemorySystem:
             if not only_stats:
                 print(level)
             level.show_statistics()
+            level.show_costs()
 
 
 
@@ -124,6 +135,13 @@ class CacheLine:
 
 class CacheStatistics:
     def __init__(self):
+        self.reset()
+        
+    def reset(self):
+        self.cost_hit = 1
+        self.cost_miss = 200
+        self.cost_through = 50
+        
         self.read_hit = 0
         self.read_miss = 0
 
@@ -146,9 +164,19 @@ class CacheStatistics:
         hitrate_read = float(self.read_hit) / float(total_reads) * 100.0 if total_reads > 0 else 0
         total_writes = self.write_hit + self.write_miss
         hitrate_write = float(self.write_hit) / float(total_writes) * 100.0 if total_writes > 0 else 0
-        return f'Reads: [{Fore.GREEN}{self.read_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_reads}{Style.RESET_ALL}]({hitrate_read:.2f}) Writes: [{Fore.GREEN}{self.write_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_writes}{Style.RESET_ALL}]({hitrate_write:.2f}) WT[[{self.write_through}]]' + \
+        return f'Reads: [{Fore.GREEN}{self.read_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_reads}{Style.RESET_ALL}]({hitrate_read:.2f}) Writes: [{Fore.GREEN}{self.write_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_writes}{Style.RESET_ALL}]({hitrate_write:.2f}) [{Fore.LIGHTMAGENTA_EX}{self.write_through}{Style.RESET_ALL}{prettyup}]' + \
             " [Blocks: " + Fore.GREEN + str(self.line_hit) + Style.RESET_ALL + "/" + Fore.RED + str(self.line_miss) + " " + prettydown + str(self.line_pull) + "(" + prettydowndown + str(self.line_prefetch) + ") " + prettyup + str(self.line_evict) + "]" + \
             " [Victim: " + prettyswap + str(self.victim_swap) + " " + prettyright + str(self.victim_push) + " " + prettyupyellow + str(self.victim_evict) + "]"
+            
+    def get_cost(self):
+        total_hit = self.read_hit + self.write_hit
+        cost_hit = total_hit * self.cost_hit
+        total_miss = self.read_miss + self.write_miss
+        cost_miss = total_miss * self.cost_miss
+        total_through = self.write_through
+        cost_through = total_through * self.cost_through
+        total_cost = cost_hit + cost_miss + cost_through
+        return f'Cost: {Fore.YELLOW}{total_cost}{Style.RESET_ALL} {prettyright} {Fore.GREEN}{total_hit}{Style.RESET_ALL} hits: [{Fore.YELLOW}{cost_hit}{Style.RESET_ALL}] | {Fore.RED}{total_miss}{Style.RESET_ALL} misses: [{Fore.YELLOW}{cost_miss}{Style.RESET_ALL}] | {Fore.BLUE}{total_through}{Style.RESET_ALL} through: [{Fore.YELLOW}{cost_through}{Style.RESET_ALL}]'
 
 
 class MainMemory:
@@ -158,6 +186,9 @@ class MainMemory:
         self.address_width = address_width
         self.line_size_width = line_size_width
         self.statistics = CacheStatistics()
+        
+    def __contains__(self, key):
+        return key < (1 << self.address_width)
 
     def get_block(self, addr):
         return addr >> self.line_size_width
@@ -177,10 +208,18 @@ class MainMemory:
 
     def show_statistics(self):
         print(self.name + ": " + self.statistics.get_statistics())
+        
+    def show_costs(self):
+        print(self.name + ": " + self.statistics.get_cost())
 
     def reset_statistics(self):
-        self.statistics = CacheStatistics()
-
+        self.statistics.reset()
+        
+    def reset_costs(self, cost_hit, cost_miss, cost_through):
+        self.statistics.cost_hit = cost_hit
+        self.statistics.cost_miss = cost_miss
+        self.statistics.cost_through = cost_through
+        
     def __str__(self):
         return "%s: %s (%s of %s)" % (self.name, bits_to_power(self.address_width, 'B'), bits_to_power(self.address_width-self.line_size_width, ' Blocks'), bits_to_power(self.line_size_width, 'B'))
 
@@ -315,7 +354,8 @@ class Cache:
 
             #ask higher level for data since we did not find it inside or in victim
             self.statistics.line_pull += 1
-            if not self.load_from.read(addr):
+            self.load_from.read(addr)
+            if addr not in self.load_from:
                 print("An address was requested to a memory that does not have it nor does it have a higher order memory connected")
                 return False
             print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyleft + " Tag 0x%0x from %s to %s set 0x%0x" % (self.get_tag(addr), self.load_from.name, self.name, self.get_set_idx(addr)))
@@ -443,22 +483,19 @@ class Cache:
 
     def show_statistics(self):
         print(self.name + ": " + self.statistics.get_statistics())
+    
+    def show_costs(self):
+        print(self.name + ": " + self.statistics.get_cost())
 
     def reset_statistics(self):
-        self.statistics = CacheStatistics()
+        self.statistics.reset()
+        
+    def reset_costs(self, cost_hit, cost_miss, cost_through):
+        self.statistics.cost_hit = cost_hit
+        self.statistics.cost_miss = cost_miss
+        self.statistics.cost_through = cost_through
 
 
-"""
-    write_allocate: reserves memory when writing (brings block)
-    no write_allocate: does not reserve memory if the block is not in cache (just writes to upper memory)
-
-    TODO:
-    write_back: only write a block when evicted
-    write_through: writes all the hierarchy when dirty, no waiting for eviction
-
-    TODO:
-    differentiate between line read/writes and word read/writes since it is different!!!
-"""
 
 import cmd2
 
@@ -476,6 +513,10 @@ class Cacheasy(cmd2.Cmd):
         self.write_back = True
         self.write_allocate = True
         self.prefetch = 0
+        
+        self.cost_hit = 1
+        self.cost_miss = 200
+        self.cost_through = 50
         super().__init__()
         
         
@@ -544,7 +585,7 @@ class Cacheasy(cmd2.Cmd):
         print(f"Prefetch blocks: {self.prefetch}")
 
     def do_show_state(self, args):
-        self.memsys.show_state()  
+        self.memsys.show_state(only_stats=args == "stats")
 
     def parseint(self, oldval, args, name=""):
         try:
@@ -557,7 +598,7 @@ class Cacheasy(cmd2.Cmd):
     
     def parsebool(self, oldval, args, name=""):
         try:
-            data = bool(args)
+            data = args == "True"
             print(f"{Fore.GREEN}{name}{Style.RESET_ALL}set to {Fore.YELLOW}{data}{Style.RESET_ALL}")
             return data
         except Exception as e:
@@ -602,14 +643,24 @@ class Cacheasy(cmd2.Cmd):
         self.write_allocate = self.parsebool(self.write_allocate, args, name="Write allocate ")
     def do_policy(self, args):
         self.replacement_policy = self.parsepolicy(self.replacement_policy, args, name="Replacement policy ")
-
+    def do_cost_hit(self, args):
+        self.cost_hit = self.parseint(self.cost_hit, args, name="Cost hit ")
+    def do_cost_miss(self, args):
+        self.cost_miss = self.parseint(self.cost_miss, args, name="Cost miss ")
+    def do_cost_through(self, args):
+        self.cost_through = self.parseint(self.cost_through, args, name="Cost through ")
+    def do_reset_stats(self, args):
+        self.memsys.reset_statistics()
+    def do_reset_costs(self, args):
+        self.memsys.last_level.reset_costs(cost_hit = self.cost_hit, cost_miss = self.cost_miss, cost_through = self.cost_through)
+        
 
     def do_create(self, args):
         """create
         Create a memory system with the configured address width and line width
         """
         self.memsys = MemorySystem(self.address_width, self.line_size_width)
-        print(f"{Fore.BLUE}Created memory system{Style.RESET_ALL}")
+        self.poutput(f"{Fore.BLUE}{Back.GREEN}Created memory system {Fore.RED}{args}{Style.RESET_ALL}")
 
     def do_memory(self, args):
         """memory
@@ -661,3 +712,19 @@ class Cacheasy(cmd2.Cmd):
 
 if __name__ == '__main__':
     Cacheasy().cmdloop()
+    
+    
+"""
+    write_allocate: reserves memory when writing (brings block)
+    no write_allocate: does not reserve memory if the block is not in cache (just writes to upper memory)
+
+    TODO:
+    write_back: only write a block when evicted
+    write_through: writes all the hierarchy when dirty, no waiting for eviction
+
+    TODO:
+    differentiate between line read/writes and word read/writes since it is different!!!
+    
+    TODO:
+    implement a simple virtual memory system with TLB. 
+"""
