@@ -138,9 +138,10 @@ class CacheStatistics:
         self.reset()
         
     def reset(self):
-        self.cost_hit = 1
+        self.cost_hit = 0
         self.cost_miss = 200
         self.cost_through = 50
+        self.cost_access = 1
         
         self.read_hit = 0
         self.read_miss = 0
@@ -173,10 +174,12 @@ class CacheStatistics:
         cost_hit = total_hit * self.cost_hit
         total_miss = self.read_miss + self.write_miss
         cost_miss = total_miss * self.cost_miss
+        total_access = total_hit + total_miss
+        cost_access = total_access * self.cost_access
         total_through = self.write_through
         cost_through = total_through * self.cost_through
-        total_cost = cost_hit + cost_miss + cost_through
-        return f'Cost: {Fore.YELLOW}{total_cost}{Style.RESET_ALL} {prettyright} {Fore.GREEN}{total_hit}{Style.RESET_ALL} hits: [{Fore.YELLOW}{cost_hit}{Style.RESET_ALL}] | {Fore.RED}{total_miss}{Style.RESET_ALL} misses: [{Fore.YELLOW}{cost_miss}{Style.RESET_ALL}] | {Fore.BLUE}{total_through}{Style.RESET_ALL} through: [{Fore.YELLOW}{cost_through}{Style.RESET_ALL}]'
+        total_cost = cost_access + cost_hit + cost_miss + cost_through
+        return f'Cost: [{Fore.YELLOW}{total_cost}{Style.RESET_ALL}] {prettyright} {Fore.YELLOW}{total_access}{Style.RESET_ALL} accesses: [{Fore.YELLOW}{cost_access}{Style.RESET_ALL}] | {Fore.GREEN}{total_hit}{Style.RESET_ALL} hits: [{Fore.YELLOW}{cost_hit}{Style.RESET_ALL}] | {Fore.RED}{total_miss}{Style.RESET_ALL} misses: [{Fore.YELLOW}{cost_miss}{Style.RESET_ALL}] | {Fore.BLUE}{total_through}{Style.RESET_ALL} through: [{Fore.YELLOW}{cost_through}{Style.RESET_ALL}]'
 
 
 class MainMemory:
@@ -490,10 +493,11 @@ class Cache:
     def reset_statistics(self):
         self.statistics.reset()
         
-    def reset_costs(self, cost_hit, cost_miss, cost_through):
+    def reset_costs(self, cost_hit, cost_miss, cost_through, cost_access):
         self.statistics.cost_hit = cost_hit
         self.statistics.cost_miss = cost_miss
         self.statistics.cost_through = cost_through
+        self.statistics.cost_access = cost_access
 
 
 
@@ -514,9 +518,10 @@ class Cacheasy(cmd2.Cmd):
         self.write_allocate = True
         self.prefetch = 0
         
-        self.cost_hit = 1
+        self.cost_hit = 0
         self.cost_miss = 200
         self.cost_through = 50
+        self.cost_access = 1
         super().__init__()
         
         
@@ -643,6 +648,8 @@ class Cacheasy(cmd2.Cmd):
         self.write_allocate = self.parsebool(self.write_allocate, args, name="Write allocate ")
     def do_policy(self, args):
         self.replacement_policy = self.parsepolicy(self.replacement_policy, args, name="Replacement policy ")
+    def do_cost_access(self, args):
+        self.cost_access = self.parseint(self.cost_access, args, name="Cost access ")
     def do_cost_hit(self, args):
         self.cost_hit = self.parseint(self.cost_hit, args, name="Cost hit ")
     def do_cost_miss(self, args):
@@ -651,8 +658,11 @@ class Cacheasy(cmd2.Cmd):
         self.cost_through = self.parseint(self.cost_through, args, name="Cost through ")
     def do_reset_stats(self, args):
         self.memsys.reset_statistics()
+        print(f"{Fore.BLUE}Reset statistics{Style.RESET_ALL}")
+        
     def do_reset_costs(self, args):
-        self.memsys.last_level.reset_costs(cost_hit = self.cost_hit, cost_miss = self.cost_miss, cost_through = self.cost_through)
+        self.memsys.last_level.reset_costs(cost_hit = self.cost_hit, cost_miss = self.cost_miss, cost_through = self.cost_through, cost_access = self.cost_access)
+        print(f"{Fore.BLUE}Reset costs{Style.RESET_ALL}")
         
 
     def do_create(self, args):
@@ -660,7 +670,7 @@ class Cacheasy(cmd2.Cmd):
         Create a memory system with the configured address width and line width
         """
         self.memsys = MemorySystem(self.address_width, self.line_size_width)
-        self.poutput(f"{Fore.BLUE}{Back.GREEN}Created memory system {Fore.RED}{args}{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{Back.GREEN}Created memory system {Fore.RED}{args}{Style.RESET_ALL}")
 
     def do_memory(self, args):
         """memory
