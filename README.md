@@ -9,6 +9,7 @@ It supports the following features:
 * Write allocate / no write allocate
 * Multiple replacement policies (FIFO/LRU/MRU/Random)
 * Configurable number of sets and ways per cache level
+* Virtual memory on top of a cache
 
 It is built on top of a command line interface supporting:
 * Running scripts
@@ -28,8 +29,16 @@ Or you can also run it with a script
 
 > python cacheasy.py "run_script \<script\>"
 
+### Simulating cache memory
+
 As an example, let's see the output of running the previous command, with the script `ejesp3.chs`
 
 ![Screenshot after running `python3 cacheasy.py "run_script ejesp3.chs`.](https://github.com/Daniel-BG/cacheasy/blob/master/res/example.png)
 
 The simulator outputs a log of the different types of operations (accesses, misses, block transfers...) after each request (`read`/`write`) to the memory system. To see the statistics at any time, you can run the `show_state` command which will print information about the addresses contained in the cache, as well as its metrics.
+
+### Simulating virtual memory
+
+Python scripts can be more complex, and run multiple operations silently before starting to output information, in order to set up an initial state. The following example sets up caches and virtual memory before performing some operations:
+
+![Screenshot after running `python3 cacheasy.py 'run_pyscript scripts/ej_virt_1.py`.](https://github.com/Daniel-BG/cacheasy/blob/master/res/example_virt.png)

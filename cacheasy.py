@@ -6,85 +6,182 @@ rng = np.random.default_rng()
 ReplacementPolicy = Enum('ReplacementPolicy', ['FIFO', 'LRU', 'MRU', 'RANDOM'])
 
 from colorama import Fore, Back, Style
-def prettydir(addr, totalbits, setbits, bytebits, brackets=True, tagcol = Fore.RED):
+def prettydir(addr, totalbits, setbits, bytebits, brackets=True, tagcol = Fore.RED, virtualbits = 0):
     #calculate the toal amount of bits
     blockbits = totalbits - setbits - bytebits
     #convert addr to binary string of (totalbits)
-    binstring = format(addr, '0'+str(totalbits)+'b')
+    binstring = f"{addr:0{totalbits}b}" 
     #separate bits
     blockstr = binstring[:blockbits]
     setstr = binstring[blockbits:blockbits+setbits]
     bytebits = binstring[blockbits+setbits:]
+    
+    app_str = " " * (virtualbits - totalbits) if virtualbits > totalbits else ""
 
     if brackets:
-        return '[' + tagcol + blockstr + Fore.GREEN + setstr + Fore.BLUE + bytebits + Style.RESET_ALL + ']'
+        return f"[{app_str}{tagcol}{blockstr}{Fore.GREEN}{setstr}{Fore.BLUE}{bytebits}{Style.RESET_ALL}]"
     else:
-        return tagcol + blockstr + Fore.GREEN + setstr + Fore.BLUE + bytebits + Style.RESET_ALL
+        return f"{app_str}{tagcol}{blockstr}{Fore.GREEN}{setstr}{Fore.BLUE}{bytebits}{Style.RESET_ALL}"
     
-prettytick = Fore.GREEN + "✔" + Style.RESET_ALL
-prettyfail = Fore.RED + "✘" + Style.RESET_ALL
-prettyright = Fore.YELLOW + "→" + Style.RESET_ALL
-prettyleft = Fore.YELLOW + "←" + Style.RESET_ALL
-prettyup = Fore.BLUE + "↑" + Style.RESET_ALL
-prettyupyellow = Fore.YELLOW + "↑" + Style.RESET_ALL
-prettydown = Fore.BLUE + "↓" + Style.RESET_ALL
-prettydowndown = Fore.BLUE + "⯯" + Style.RESET_ALL
-prettyswap = Fore.YELLOW + "⇆" + Style.RESET_ALL
-
-"""prettytick = Fore.GREEN + "o" + Style.RESET_ALL
-prettyfail = Fore.RED + "x" + Style.RESET_ALL
-prettyright = Fore.YELLOW + ">" + Style.RESET_ALL
-prettyleft = Fore.YELLOW + "<" + Style.RESET_ALL
-prettyup = Fore.BLUE + "^" + Style.RESET_ALL
-prettyupyellow = Fore.YELLOW + "^" + Style.RESET_ALL
-prettydown = Fore.BLUE + "v" + Style.RESET_ALL
-prettydowndown = Fore.BLUE + "vv" + Style.RESET_ALL
-prettyswap = Fore.YELLOW + "<>" + Style.RESET_ALL"""
+prettytick = f"{Fore.GREEN}✔{Style.RESET_ALL}"
+prettyfail = f"{Fore.RED}✘{Style.RESET_ALL}"
+prettyright = f"{Fore.YELLOW}→{Style.RESET_ALL}"
+prettyleft = f"{Fore.YELLOW}←{Style.RESET_ALL}"
+prettyup = f"{Fore.BLUE}↑{Style.RESET_ALL}"
+prettyupyellow = f"{Fore.YELLOW}↑{Style.RESET_ALL}"
+prettydown = f"{Fore.BLUE}↓{Style.RESET_ALL}"
+prettydowndown = f"{Fore.BLUE}⯯{Style.RESET_ALL}"
+prettyswap = f"{Fore.YELLOW}⇆{Style.RESET_ALL}"
+prettytrash = f"{Fore.MAGENTA}🗑{Style.RESET_ALL}"
 
 
 def bits_to_power(bits, unit):
     if bits < 10:
-        return str(2**bits) + unit
+        return f"{2**bits}{unit}"
     if bits < 20:
-        return str(2**(bits - 10)) + "K" + unit
+        return f"{2**(bits-10)}K{unit}"
     if bits < 30:
-        return str(2**(bits - 20)) + "M" + unit
+        return f"{2**(bits-20)}M{unit}"
     if bits < 40:
-        return str(2**(bits - 30)) + "G" + unit
+        return f"{2**(bits-30)}G{unit}" 
     if bits < 50:
-        return str(2**(bits - 40)) + "T" + unit
+        return f"{2**(bits-40)}T{unit}" 
     if bits < 60:
-        return str(2**(bits - 50)) + "P" + unit
-    return str(2**(bits - 60)) + "E" + unit
+        return f"{2**(bits-50)}P{unit}" 
+    return f"{2**(bits-60)}E{unit}"
 
 
+from collections import OrderedDict
+
+
+class VirtualMemory:
+    
+    #TLB
+    #virtual page, physical page (marco), active, edad
+    
+    def __init__(self, name, virtual_address_width, address_width, page_width):
+        #sanity checks
+        if virtual_address_width < address_width or address_width < page_width:
+            raise Exception("Wrong virtual memory parameters")
+        
+        self.name = name
+        self.virtual_address_width = virtual_address_width
+        self.address_width = address_width
+        self.page_width = page_width
+        self.number_of_pages = 2**(self.address_width-self.page_width)
+        #TLB is an ordered dictionary of virtual_page, phys_page values
+        #being in the dictionary means the page is actively translated
+        #the position in the dictionary is the age of the page
+        #(older pages first due to OrderedDict implementation)
+        self.TLB = OrderedDict() 
+        
+    def add_memory_system(self, memory_system):
+        self.memory_system = memory_system
+        
+    def evict_load_page(self, virtual_page):
+        if virtual_page not in self.TLB:
+            print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} Virtual page 0x{virtual_page:0x} not found")
+            physical_page = None
+            if len(self.TLB) == self.number_of_pages:
+                #evict
+                entry = self.TLB.popitem(last = False)
+                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} TLB full. Invalidating virtual page 0x{entry[0]:0x} @ physical 0x{entry[1]:0x} and clearing caches")
+                physical_page = entry[1] #this page will be the new physical one
+                initial_address = physical_page * 2**self.page_width
+                final_address = physical_page * 2**self.page_width + 2**self.page_width - 1
+                self.memory_system.clear(initial_address, final_address)
+                self.memory_system.load(initial_address)
+                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyswap} Virtual page 0x{virtual_page:0x} replaces 0x{entry[0]:0x} on physical page 0x{physical_page:0x}")
+            else:
+                physical_page = len(self.TLB)
+                initial_address = physical_page * 2**self.page_width
+                self.memory_system.load(initial_address)
+                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettydown} Virtual page 0x{virtual_page:0x} loaded into 0x{physical_page:0x}")
+            self.TLB[virtual_page] = physical_page
+        else:
+            physical_page = self.TLB[virtual_page]
+            self.TLB.move_to_end(virtual_page)
+            print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettytick} Virtual page 0x{virtual_page:0x} found at physical 0x{physical_page:0x}")
+        
+                
+            
+    def get_physical_address(self, virtual_address):
+        virtual_page = virtual_address >> self.page_width
+        physical_page = self.TLB[virtual_page]
+        offset = virtual_address % (2**self.page_width)
+        return (physical_page << self.page_width) + offset
+    
+    def get_virtual_page_number(self, virtual_address):
+        return virtual_address >> self.page_width
+            
+    def _read_virtual(self, virtual_address):
+        virtual_page = self.get_virtual_page_number(virtual_address)
+        self.evict_load_page(virtual_page)
+        self.memory_system.read(self.get_physical_address(virtual_address))
+        
+    def _write_virtual(self, virtual_address):
+        virtual_page = self.get_virtual_page_number(virtual_address)
+        self.evict_load_page(virtual_page)
+        self.memory_system.write(self.get_physical_address(virtual_address))
+        
+    def read(self, init, end = None, step = None):
+        if end is None:
+            end = init
+        if step is None:
+            step = 1
+        for i in range(init, end + 1, step):
+            print(f"{prettydir(i, self.virtual_address_width, 0, 0, tagcol = Fore.LIGHTCYAN_EX, virtualbits=self.virtual_address_width)}{Fore.YELLOW} R Virtual Read Request{Style.RESET_ALL}")
+            self._read_virtual(i)
+
+    def write(self, init, end = None, step = None):
+        if end is None:
+            end = init
+        if step is None:
+            step = 1
+        for i in range(init, end + 1, step):
+            print(f"{prettydir(i, self.virtual_address_width, 0, 0, tagcol = Fore.LIGHTCYAN_EX, virtualbits=self.virtual_address_width)}{Fore.YELLOW} W Virtual Write Request{Style.RESET_ALL}")
+            self._write_virtual(i)
+            
+    def reset_statistics(self):
+        self.memory_system.reset_statistics()
+
+    def show_state(self, only_stats = False):
+        printstr = f"{self.name}:\nTLB: "
+        numzeros_virt = (self.virtual_address_width - self.page_width + 3) // 4
+        numzeros_phys = (self.address_width - self.page_width + 3) // 4
+        for entry in self.TLB.items():
+            printstr += f"[{Fore.RED}0x{entry[0]:0{numzeros_virt}x} {prettyright} {Fore.GREEN}0x{entry[1]:0{numzeros_phys}x}{Style.RESET_ALL}]"
+        
+        print(printstr)        
+        self.memory_system.show_state(only_stats)
 
 
 class MemorySystem:
 
-    def __init__(self, address_width, line_size_width):
+    def __init__(self, address_width, virtual_address_width=0):
         self.address_width = address_width
-        self.line_size_width = line_size_width
         self.levels = []
         self.last_level = None
+        #for pretty printing
+        self.virtual_address_width = virtual_address_width
 
-    def add_main(self, name = "Main Memory"):
+    def add_main(self, line_size_width, name = "Main Memory"):
         if self.last_level is not None:
             raise Exception("Can't add main memory below a cache level")
-        self.last_level = MainMemory(address_width = self.address_width, line_size_width = self.line_size_width, name = name)
+        self.last_level = MainMemory(address_width = self.address_width, line_size_width = line_size_width, name = name, virtual_address_width=self.virtual_address_width)
         self.levels.append(self.last_level)
 
-    def add_cache(self, name, set_width, way_width, replacement_policy, write_back, write_allocate, prefetch):
-        if self.last_level is None:
-            raise Exception("Add main memory before caches")
-        new_cache = Cache(name = name, set_width = set_width, way_width = way_width, line_size_width = self.line_size_width, replacement_policy = replacement_policy, write_back = write_back, write_allocate = write_allocate, load_from = self.last_level, store_to = self.last_level, victim = None, address_width = self.address_width, prefetch = prefetch)
+    def add_cache(self, name, set_width, way_width, line_size_width, replacement_policy, write_back, write_allocate, prefetch):
+        #if self.last_level is None:
+        #    raise Exception("Add main memory before caches")
+        new_cache = Cache(name = name, set_width = set_width, way_width = way_width, line_size_width = line_size_width, replacement_policy = replacement_policy, write_back = write_back, write_allocate = write_allocate, parent = self.last_level, victim = None, address_width = self.address_width, prefetch = prefetch, virtual_address_width=self.virtual_address_width)
         self.last_level = new_cache
         self.levels.append(self.last_level)
 
-    def add_victim(self, name, set_width, way_width, replacement_policy):
+    def add_victim(self, name, set_width, way_width, line_size_width, replacement_policy):
         if self.last_level is None or not hasattr(self.last_level, 'victim'):
             raise Exception("Can't add victim to an empty memory system or to main memory directly. Add a cache first")
-        victim = Cache(name, set_width, way_width, line_size_width = self.line_size_width, replacement_policy = replacement_policy, address_width = self.address_width)
+        victim = Cache(name, set_width, way_width, line_size_width = line_size_width, replacement_policy = replacement_policy, address_width = self.address_width, virtual_address_width=self.virtual_address_width)
         self.last_level.victim = victim
 
     def read(self, init, end = None, step = None):
@@ -93,7 +190,7 @@ class MemorySystem:
         if step is None:
             step = 1
         for i in range(init, end + 1, step):
-            print(prettydir(i, self.address_width, 0, 0, tagcol = Fore.YELLOW) + Fore.YELLOW + " R Read Request" + Style.RESET_ALL)
+            print(f"{prettydir(i, self.address_width, 0, 0, tagcol = Fore.YELLOW, virtualbits=self.virtual_address_width)}{Fore.YELLOW} R Read Request{Style.RESET_ALL}")
             self.last_level.read(i)
 
     def write(self, init, end = None, step = None):
@@ -102,7 +199,7 @@ class MemorySystem:
         if step is None:
             step = 1
         for i in range(init, end + 1, step):
-            print(prettydir(i, self.address_width, 0, 0, tagcol = Fore.YELLOW) + Fore.YELLOW + " W Write Request" + Style.RESET_ALL)
+            print(f"{prettydir(i, self.address_width, 0, 0, tagcol = Fore.YELLOW, virtualbits=self.virtual_address_width)}{Fore.YELLOW} W Write Request{Style.RESET_ALL}")
             self.last_level.write(i)
 
     def reset_statistics(self):
@@ -115,6 +212,14 @@ class MemorySystem:
                 print(level)
             level.show_statistics()
             level.show_costs()
+            
+    #clear from bottom up
+    def clear(self, initial_address, final_address):
+        self.last_level.clear(initial_address, final_address)
+        
+    #load from top down
+    def load(self, initial_address):
+        self.levels[0].load(initial_address)
 
 
 
@@ -128,11 +233,9 @@ class CacheLine:
         self.valid = valid
         
     def prettyprint(self, tag_width):
-        string = prettydir(self.tag, tag_width, 0, 0, brackets = False)
-        string += (Fore.BLACK if not self.valid else Fore.GREEN) + "V" + Style.RESET_ALL
-        string += (Fore.BLACK if not self.dirty else Fore.YELLOW) + "D" + Style.RESET_ALL
-        return string
-
+        return f"{prettydir(self.tag, tag_width, 0, 0, brackets = False)}{Fore.BLACK if not self.valid else Fore.GREEN}V{Style.RESET_ALL}{Fore.BLACK if not self.dirty else Fore.YELLOW}D{Style.RESET_ALL}"
+    
+        
 class CacheStatistics:
     def __init__(self):
         self.reset()
@@ -166,8 +269,8 @@ class CacheStatistics:
         total_writes = self.write_hit + self.write_miss
         hitrate_write = float(self.write_hit) / float(total_writes) * 100.0 if total_writes > 0 else 0
         return f'Reads: [{Fore.GREEN}{self.read_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_reads}{Style.RESET_ALL}]({hitrate_read:.2f}) Writes: [{Fore.GREEN}{self.write_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_writes}{Style.RESET_ALL}]({hitrate_write:.2f}) [{Fore.LIGHTMAGENTA_EX}{self.write_through}{Style.RESET_ALL}{prettyup}]' + \
-            " [Blocks: " + Fore.GREEN + str(self.line_hit) + Style.RESET_ALL + "/" + Fore.RED + str(self.line_miss) + " " + prettydown + str(self.line_pull) + "(" + prettydowndown + str(self.line_prefetch) + ") " + prettyup + str(self.line_evict) + "]" + \
-            " [Victim: " + prettyswap + str(self.victim_swap) + " " + prettyright + str(self.victim_push) + " " + prettyupyellow + str(self.victim_evict) + "]"
+            f" [Blocks: {Fore.GREEN}{self.line_hit}{Style.RESET_ALL}/{Fore.RED}{self.line_miss} {prettydown}{self.line_pull}({prettydowndown}{self.line_prefetch}) {prettyup}{self.line_evict}]" + \
+            f" [Victim: {prettyswap}{self.victim_swap} {prettyright}{self.victim_push} {prettyupyellow}{self.victim_evict}]"
             
     def get_cost(self):
         total_hit = self.read_hit + self.write_hit
@@ -184,11 +287,13 @@ class CacheStatistics:
 
 class MainMemory:
 
-    def __init__(self, address_width, line_size_width, name = "Main memory"):
+    def __init__(self, address_width, line_size_width, name = "Main memory", virtual_address_width = 0):
         self.name = name
         self.address_width = address_width
         self.line_size_width = line_size_width
         self.statistics = CacheStatistics()
+        #for pretty printing
+        self.virtual_address_width = virtual_address_width
         
     def __contains__(self, key):
         return key < (1 << self.address_width)
@@ -198,22 +303,22 @@ class MainMemory:
 
     def read(self, addr):
         self.statistics.read_hit += 1
-        print(prettydir(addr, self.address_width, 0, self.line_size_width) + " " + prettydown +  (" Block 0x%0x read from main memory" % self.get_block(addr)))
+        print(f"{prettydir(addr, self.address_width, 0, self.line_size_width, virtualbits=self.virtual_address_width)} {prettydown} Block 0x{self.get_block(addr):0x} read from main memory")
         return True
 
     def write(self, addr):
         self.statistics.write_hit += 1
-        print(prettydir(addr, self.address_width, 0, self.line_size_width) + " " + prettyup + (" Block 0x%0x written to main memory" % self.get_block(addr)))
+        print(f"{prettydir(addr, self.address_width, 0, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyup}( Block 0x{self.get_block(addr):0x} written to main memory")
         return True
 
     def write_line(self, line):
         return self.write(line.addr)
 
     def show_statistics(self):
-        print(self.name + ": " + self.statistics.get_statistics())
+        print(f"{self.name}: {self.statistics.get_statistics()}")
         
     def show_costs(self):
-        print(self.name + ": " + self.statistics.get_cost())
+        print(f"{self.name}: {self.statistics.get_cost()}")
 
     def reset_statistics(self):
         self.statistics.reset()
@@ -224,12 +329,12 @@ class MainMemory:
         self.statistics.cost_through = cost_through
         
     def __str__(self):
-        return "%s: %s (%s of %s)" % (self.name, bits_to_power(self.address_width, 'B'), bits_to_power(self.address_width-self.line_size_width, ' Blocks'), bits_to_power(self.line_size_width, 'B'))
+        return f"{self.name}: {bits_to_power(self.address_width, 'B')} ({bits_to_power(self.address_width-self.line_size_width, ' Blocks')} of {bits_to_power(self.line_size_width, 'B')})"
 
 
 class Cache:
 
-    def __init__(self, name, set_width, way_width, line_size_width, replacement_policy = ReplacementPolicy.LRU, write_back = True, write_allocate = True, load_from = None, store_to = None, victim = None, address_width = 32, prefetch = None):
+    def __init__(self, name, set_width, way_width, line_size_width, replacement_policy = ReplacementPolicy.LRU, write_back = True, write_allocate = True, parent = None, victim = None, address_width = 32, prefetch = None, virtual_address_width=0):
         self.replacement_policy = replacement_policy
 
         #Log base two of the number of sets, ways and bytes per line
@@ -246,12 +351,12 @@ class Cache:
         #prefetch, when a block fails to be located, bring the X ones as well
         self.prefetch = prefetch
 
-        self.load_from = load_from  #memory where we load from. Might be None (e.g:victim)
-        self.store_to = store_to    #memory where we store to. Might be None (e.g:victim)
+        self.parent = parent  #memory where we load from / write to. Might be None (e.g:victim)
         self.victim = victim        #victim cache. Might be None (e.g:mainmemory)
 
         #for pretty printing and statistics
         self.address_width = address_width 
+        self.virtual_address_width = virtual_address_width
         self.name = name
         self.statistics = CacheStatistics()
 
@@ -311,57 +416,62 @@ class Cache:
             #if not, write next level
             else:
                 self.statistics.write_through += 1
-                self.store_to.write(addr)
+                self.parent.write(addr)
 
 
     #gets an address for this cache. Internal statistics are updated, and data is brought if needed
     def get(self, addr, prefetched = 0):
+        value = self._get(addr, prefetched)
+        self._update(addr)
+        return value
+        
+    def _get(self, addr, prefetched = 0):
         if addr in self: #Data found!
-            print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettytick + " Tag 0x%0x in %s set 0x%0x" % (self.get_tag(addr), self.name, self.get_set_idx(addr)))
+            print(f"{prettydir(addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettytick} Tag 0x{self.get_tag(addr):0x} in {self.name} set 0x{self.get_set_idx(addr):0x}")
             self.statistics.line_hit += 1
             return True
         else: #data not found
             self.statistics.line_miss += 1
             if self.victim:
                 if addr in self.victim: #data found in victim
-                    print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettytick + " Addr 0x%0x in %s" % (addr, self.victim.name))
+                    print(f"{prettydir(addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettytick} Addr 0x{addr:0x} in {self.victim.name}")
                     line_from_cache = self.allocate_for(addr)
                     line_from_victim = self.victim.extract(addr)
                     self.victim.write_line(line_from_cache)
                     self.write_line(line_from_victim)
-                    print(prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyright +  " Tag 0x%0x from %s to %s" % (self.get_tag(line_from_cache.addr), self.name, self.victim.name))
-                    print(prettydir(line_from_victim.addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyleft + " Tag 0x%0x from %s to %s" % (self.get_tag(line_from_victim.addr), self.victim.name, self.name))
+                    print(f"{prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyright} Tag 0x{self.get_tag(line_from_cache.addr):0x} from {self.name} to {self.victim.name}")
+                    print(f"{prettydir(line_from_victim.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyleft} Tag 0x{self.get_tag(line_from_victim.addr):0x} from {self.victim.name} to {self.name}")
                     self.statistics.victim_swap += 1
                     return True
                 else: #data not in victim
-                    print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyfail + " Tag 0x%0x not in %s" % (self.get_tag(addr), self.name))
+                    print(f"{prettydir(addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyfail} Tag 0x{self.get_tag(addr):0x} not in {self.name}")
                     line_from_cache = self.allocate_for(addr)
                     if line_from_cache.valid: #needs to go to victim cache
                         line_from_victim = self.victim.allocate_for(line_from_cache.addr)
                         self.victim.write_line(line_from_cache)
                         self.statistics.victim_push += 1
                         if line_from_victim.valid and line_from_victim.dirty: #needs to go to upper level
-                            print(prettydir(line_from_victim.addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyright +  " Tag 0x%0x from %s to %s" % (self.get_tag(line_from_victim.addr), self.victim.name, self.store_to.name))
-                            self.store_to.write_line(line_from_victim)
+                            print(f"{prettydir(line_from_victim.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyright} Tag 0x{self.get_tag(line_from_victim.addr):0x} from {self.victim.name} to {self.parent.name}")
+                            self.parent.write_line(line_from_victim)
                             self.statistics.victim_evict += 1
-                        print(prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyright +  " Tag 0x%0x from %s to %s" % (self.get_tag(line_from_cache.addr), self.name, self.victim.name))
+                        print(f"{prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyright} Tag 0x{self.get_tag(line_from_cache.addr):0x} from {self.name} to {self.victim.name}")
 
             else: #no victim cache
-                print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyfail + " Tag 0x%0x not in %s set 0x%0x" % (self.get_tag(addr), self.name, self.get_set_idx(addr)))
+                print(f"{prettydir(addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyfail} Tag 0x{self.get_tag(addr):0x} not in {self.name} set 0x{self.get_set_idx(addr):0x}")
                 line_from_cache = self.allocate_for(addr)
                 if line_from_cache.valid and line_from_cache.dirty:
                     self.statistics.line_evict += 1
-                    self.store_to.write_line(line_from_cache)
-                    print(prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyright +  " Tag 0x%0x from %s to %s" % (self.get_tag(line_from_cache.addr), self.name, self.store_to.name))
+                    self.parent.write_line(line_from_cache)
+                    print(f"{prettydir(line_from_cache.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyright} Tag 0x{self.get_tag(line_from_cache.addr):0x} from {self.name} to {self.parent.name}")
 
 
             #ask higher level for data since we did not find it inside or in victim
             self.statistics.line_pull += 1
-            self.load_from.read(addr)
-            if addr not in self.load_from:
+            self.parent.read(addr)
+            if addr not in self.parent:
                 print("An address was requested to a memory that does not have it nor does it have a higher order memory connected")
                 return False
-            print(prettydir(addr, self.address_width, self.set_width, self.line_size_width) + " " + prettyleft + " Tag 0x%0x from %s to %s set 0x%0x" % (self.get_tag(addr), self.load_from.name, self.name, self.get_set_idx(addr)))
+            print(f"{prettydir(addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyleft} Tag 0x{self.get_tag(addr):0x} from {self.parent.name} to {self.name} set 0x{self.get_set_idx(addr):0x}")
             self._write(addr, dirty=False)
 
             if self.prefetch is not None:
@@ -371,16 +481,23 @@ class Cache:
                     self.statistics.line_prefetch += 1
                     return self.get(addr + 2**self.line_size_width, prefetched + 1)
             else:
-                return True
-
-        self._update(addr)
+                return True        
+        
 
     def write_line(self, line):
         self._write(line.addr, line.dirty)
 
     def _write(self, addr, dirty=True):
         if addr in self:
+            candidate_set = self.get_set(addr)
+            for line in candidate_set:
+                if line.valid and line.tag == self.get_tag(addr):
+                    line.dirty |= dirty
+                    self._update(addr)
+                    return
+            
             raise Exception("Adding an existing element")
+        
 
         candidate_set = self.get_set(addr)
 
@@ -410,8 +527,8 @@ class Cache:
                 #update policy
                 self._update(addr)
 
-                
-    def _update(self, addr, dirty=False):
+    #set last=True so the updated address goes to the last position
+    def _update(self, addr, dirty=False, last=False):
         candidate_set = self.get_set(addr)
         for (i, line) in enumerate(candidate_set):
             if line.tag == self.get_tag(addr):
@@ -419,13 +536,16 @@ class Cache:
                     case ReplacementPolicy.LRU | ReplacementPolicy.MRU:
                         elem = candidate_set.pop(i)
                         elem.dirty = dirty
-                        candidate_set.insert(0, elem)
+                        if last:
+                            candidate_set.append(elem)
+                        else:
+                            candidate_set.insert(0, elem)
                     case _:
                         pass
                         #doesnt matter for the rest
                 return True
         return False
-        self.statistics.writes += 1
+        
         
     def allocate_for(self, addr, force=False):
         #can return an invalid line!! be careful
@@ -457,11 +577,13 @@ class Cache:
         for (i, line) in enumerate(candidate_set):
             if line.tag == self.get_tag(addr):
                 elem = candidate_set[i]
-                candidate_set[i] = CacheLine(0,0,False,False)
+                candidate_set[i] = CacheLine(0, 0, False, False)
+                self._update(0, last=True)
                 break
         #Must return a CacheLine otherwise throw error
         if elem is None:
             raise Exception("Did not find line for extraction")
+        
         return elem
 
     def __str__(self):
@@ -476,19 +598,48 @@ class Cache:
                 linestr.append(('%s [' + Fore.YELLOW + '0x%s-0x%s' + Style.RESET_ALL + ']') % (line.prettyprint(self.address_width - self.line_size_width - self.set_width), format(base_addr, hex_fmt), format(high_addr, hex_fmt)))
 
 
-            setstr.append(",".join(linestr) + " " + prettydir(i << self.line_size_width, self.line_size_width + self.set_width, self.set_width, self.line_size_width))
+            setstr.append(f"{','.join(linestr)} {prettydir(i << self.line_size_width, self.line_size_width + self.set_width, self.set_width, self.line_size_width)}")
                         
         if self.victim:
             return "\n".join(setstr) + "\n" + str(self.victim)
         else:
             return "\n".join(setstr)
-
+        
+    def clear(self, address_low, address_high):
+        if self.victim is not None:
+            raise Exception("Clear function not implemented for the case where a victim is present")
+        
+        #print(f"Clearing from {address_low} to {address_high}")
+        
+        #clear just the possible lines that contain these addresses
+        for address in range(address_low, address_high, 2**self.line_size_width):
+            if address in self:
+                line =  self.extract(address)
+                self.statistics.line_evict += 1
+                if self.parent:
+                    if line.dirty:
+                        self.parent.write_line(line)
+                        print(f"{prettydir(line.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyup} Tag 0x{self.get_tag(line.addr):0x} from {self.name} pushed to {self.parent.name}")
+                    else:
+                        print(f"{prettydir(line.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettytrash} Tag 0x{self.get_tag(line.addr):0x} cleared from set 0x{self.get_set_idx(line.addr):0x} @ {self.name}")
+                else:
+                    print(f"{prettydir(line.addr, self.address_width, self.set_width, self.line_size_width, virtualbits=self.virtual_address_width)} {prettytrash} Tag 0x{self.get_tag(line.addr):0x} cleared from set 0x{self.get_set_idx(line.addr):0x} @ {self.name}")
+                
+        if self.parent:
+            self.parent.clear(address_low, address_high)
+                
+        
+        
+    def load(self, address):
+        if address in self:
+            raise Exception("When loading we should not get here")
+        self._write(address, dirty=False) #no questions asked above. When calling this function address should not be in this memory
 
     def show_statistics(self):
-        print(self.name + ": " + self.statistics.get_statistics())
+        print(f"{self.name}: {self.statistics.get_statistics()}")
     
     def show_costs(self):
-        print(self.name + ": " + self.statistics.get_cost())
+        print(f"{self.name}: {self.statistics.get_cost()}")
 
     def reset_statistics(self):
         self.statistics.reset()
@@ -504,11 +655,12 @@ class Cache:
 import cmd2
 
 class Cacheasy(cmd2.Cmd):
-    """Simple command processor example."""
+    """Command processor for the Cacheasy App"""
 
     def __init__(self):
         self.memsys = None
         self.address_width = 32
+        self.virtual_address_width = 0
         self.line_size_width = 8
         self.memory_name = "MEM"
         self.set_width = 3
@@ -524,6 +676,7 @@ class Cacheasy(cmd2.Cmd):
         self.cost_access = 1
         super().__init__()
         
+
         
     def parse_number(self, input_str):
         try:
@@ -630,6 +783,8 @@ class Cacheasy(cmd2.Cmd):
             print(e)
             return oldval
 
+    def do_virtual_address_width(self, args):
+        self.virtual_address_width = self.parseint(self.virtual_address_width, args, name="Virtual address width ")
     def do_address_width(self, args):
         self.address_width = self.parseint(self.address_width, args, name="Address width ")
     def do_set_width(self, args):
@@ -669,8 +824,22 @@ class Cacheasy(cmd2.Cmd):
         """create
         Create a memory system with the configured address width and line width
         """
-        self.memsys = MemorySystem(self.address_width, self.line_size_width)
+        self.memsys = MemorySystem(self.address_width, self.virtual_address_width)
         print(f"{Fore.BLUE}{Back.GREEN}Created memory system {Fore.RED}{args}{Style.RESET_ALL}")
+        
+    def do_virtual(self, args):
+        """virtual
+        Create a virtual memory on top of the existing memory system. 
+        Last level must be a cache of line size equal to page size"""
+        if self.memsys is None:
+            print("Initialize memory first")
+        else:
+            virmem = VirtualMemory(self.memory_name, self.virtual_address_width, self.address_width, self.line_size_width)
+            virmem.add_memory_system(self.memsys)
+            #replace the memory system for the virtual one
+            self.memsys = virmem
+        print(f"{Fore.BLUE}Added virtual memory{Style.RESET_ALL}")    
+        
 
     def do_memory(self, args):
         """memory
@@ -679,7 +848,7 @@ class Cacheasy(cmd2.Cmd):
             print("Initialize memory first")
         else:
             try:
-                self.memsys.add_main(name = self.memory_name)
+                self.memsys.add_main(self.line_size_width, name = self.memory_name)
             except Exception as e:
                 print(e)
                 return
@@ -692,7 +861,7 @@ class Cacheasy(cmd2.Cmd):
             print("Initialize memory first")
         else:
             try:
-                self.memsys.add_cache(name = self.memory_name, set_width = self.set_width, way_width = self.way_width, replacement_policy = self.replacement_policy, write_back = self.write_back, write_allocate = self.write_allocate, prefetch = self.prefetch)
+                self.memsys.add_cache(name = self.memory_name, set_width = self.set_width, way_width = self.way_width, line_size_width = self.line_size_width, replacement_policy = self.replacement_policy, write_back = self.write_back, write_allocate = self.write_allocate, prefetch = self.prefetch)
             except Exception as e:
                 print(e)
                 return
@@ -705,7 +874,7 @@ class Cacheasy(cmd2.Cmd):
             print("Initialize memory first")
         else:
             try:
-                self.memsys.add_victim(name = self.memory_name, set_width = self.set_width, way_width = self.way_width, replacement_policy = self.replacement_policy)
+                self.memsys.add_victim(name = self.memory_name, set_width = self.set_width, way_width = self.way_width, line_size_width = self.line_size_width, replacement_policy = self.replacement_policy)
             except Exception as e:
                 print(e)
                 return
@@ -735,6 +904,7 @@ if __name__ == '__main__':
     TODO:
     differentiate between line read/writes and word read/writes since it is different!!!
     
-    TODO:
-    implement a simple virtual memory system with TLB. 
 """
+
+
+        
