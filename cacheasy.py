@@ -7,6 +7,8 @@ ReplacementPolicy = Enum('ReplacementPolicy', ['FIFO', 'LRU', 'MRU', 'RANDOM'])
 
 from colorama import Fore, Back, Style
 def prettydir(addr, totalbits, setbits, bytebits, brackets=True, tagcol = Fore.RED, virtualbits = 0):
+    if totalbits == 0:
+        return ""
     #calculate the toal amount of bits
     blockbits = totalbits - setbits - bytebits
     #convert addr to binary string of (totalbits)
@@ -69,6 +71,7 @@ class VirtualMemory:
         self.address_width = address_width
         self.page_width = page_width
         self.number_of_pages = 2**(self.address_width-self.page_width)
+        self.statistics = CacheStatistics()
         #TLB is an ordered dictionary of virtual_page, phys_page values
         #being in the dictionary means the page is actively translated
         #the position in the dictionary is the age of the page
@@ -80,12 +83,14 @@ class VirtualMemory:
         
     def evict_load_page(self, virtual_page):
         if virtual_page not in self.TLB:
+            self.statistics.line_miss += 1
             print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} Virtual page 0x{virtual_page:0x} not found")
             physical_page = None
             if len(self.TLB) == self.number_of_pages:
                 #evict
+                self.statistics.line_evict += 1
                 entry = self.TLB.popitem(last = False)
-                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} TLB full. Invalidating virtual page 0x{entry[0]:0x} @ physical 0x{entry[1]:0x} and clearing caches")
+                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} TLB full. Invalidating virtual page 0x{entry[0]:0x} @ physical 0x{entry[1]:0x}")
                 physical_page = entry[1] #this page will be the new physical one
                 initial_address = physical_page * 2**self.page_width
                 final_address = physical_page * 2**self.page_width + 2**self.page_width - 1
@@ -93,12 +98,14 @@ class VirtualMemory:
                 self.memory_system.load(initial_address)
                 print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyswap} Virtual page 0x{virtual_page:0x} replaces 0x{entry[0]:0x} on physical page 0x{physical_page:0x}")
             else:
+                self.statistics.line_pull += 1
                 physical_page = len(self.TLB)
                 initial_address = physical_page * 2**self.page_width
                 self.memory_system.load(initial_address)
                 print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettydown} Virtual page 0x{virtual_page:0x} loaded into 0x{physical_page:0x}")
             self.TLB[virtual_page] = physical_page
         else:
+            self.statistics.line_hit += 1
             physical_page = self.TLB[virtual_page]
             self.TLB.move_to_end(virtual_page)
             print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettytick} Virtual page 0x{virtual_page:0x} found at physical 0x{physical_page:0x}")
@@ -143,10 +150,13 @@ class VirtualMemory:
             self._write_virtual(i)
             
     def reset_statistics(self):
+        self.statistics.reset()
         self.memory_system.reset_statistics()
 
     def show_state(self, only_stats = False):
-        printstr = f"{self.name}:\nTLB: "
+        hits = self.statistics.line_hit
+        total = self.statistics.line_hit + self.statistics.line_miss
+        printstr = f"{self.name}: Translations: [{Fore.GREEN}{hits}{Style.RESET_ALL}/{Fore.YELLOW}{total}{Style.RESET_ALL}] {prettydown}{self.statistics.line_pull} {prettyup}{self.statistics.line_evict} \nTLB: "
         numzeros_virt = (self.virtual_address_width - self.page_width + 3) // 4
         numzeros_phys = (self.address_width - self.page_width + 3) // 4
         for entry in self.TLB.items():
