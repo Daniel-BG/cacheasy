@@ -28,7 +28,7 @@ read 0x14be00
 read 0x100600
 
 show_state 
-reset_statistics
+reset_stats
 
 read 0x334500
 read 0x14bf00

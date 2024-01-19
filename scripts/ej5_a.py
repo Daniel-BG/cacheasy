@@ -21,7 +21,7 @@ for i in range(16):
     app('read ' + str(dir_a + 4*i), echo=True)
     app('write ' + str(dir_c + 4*i), echo=True)
 app('show_state stats', echo=True)
-
+app('show_costs', echo=True)
 
 #int A [16][16];
 #int B [32];

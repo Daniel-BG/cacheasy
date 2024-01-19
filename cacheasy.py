@@ -1,5 +1,6 @@
 from enum import Enum
 import numpy as np
+import math
 
 rng = np.random.default_rng()
 
@@ -58,7 +59,7 @@ from collections import OrderedDict
 
 class VirtualMemory:
     
-    #TLB
+    #page table
     #virtual page, physical page (marco), active, edad
     
     def __init__(self, name, virtual_address_width, address_width, page_width):
@@ -72,25 +73,25 @@ class VirtualMemory:
         self.page_width = page_width
         self.number_of_pages = 2**(self.address_width-self.page_width)
         self.statistics = CacheStatistics()
-        #TLB is an ordered dictionary of virtual_page, phys_page values
+        #Page table is an ordered dictionary of virtual_page, phys_page values
         #being in the dictionary means the page is actively translated
         #the position in the dictionary is the age of the page
         #(older pages first due to OrderedDict implementation)
-        self.TLB = OrderedDict() 
+        self.page_table = OrderedDict() 
         
     def add_memory_system(self, memory_system):
         self.memory_system = memory_system
         
     def evict_load_page(self, virtual_page):
-        if virtual_page not in self.TLB:
+        if virtual_page not in self.page_table:
             self.statistics.line_miss += 1
             print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} Virtual page 0x{virtual_page:0x} not found")
             physical_page = None
-            if len(self.TLB) == self.number_of_pages:
+            if len(self.page_table) == self.number_of_pages:
                 #evict
                 self.statistics.line_evict += 1
-                entry = self.TLB.popitem(last = False)
-                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} TLB full. Invalidating virtual page 0x{entry[0]:0x} @ physical 0x{entry[1]:0x}")
+                entry = self.page_table.popitem(last = False)
+                print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyfail} Page table full. Invalidating virtual page 0x{entry[0]:0x} @ physical 0x{entry[1]:0x}")
                 physical_page = entry[1] #this page will be the new physical one
                 initial_address = physical_page * 2**self.page_width
                 final_address = physical_page * 2**self.page_width + 2**self.page_width - 1
@@ -99,22 +100,22 @@ class VirtualMemory:
                 print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettyswap} Virtual page 0x{virtual_page:0x} replaces 0x{entry[0]:0x} on physical page 0x{physical_page:0x}")
             else:
                 self.statistics.line_pull += 1
-                physical_page = len(self.TLB)
+                physical_page = len(self.page_table)
                 initial_address = physical_page * 2**self.page_width
                 self.memory_system.load(initial_address)
                 print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettydown} Virtual page 0x{virtual_page:0x} loaded into 0x{physical_page:0x}")
-            self.TLB[virtual_page] = physical_page
+            self.page_table[virtual_page] = physical_page
         else:
             self.statistics.line_hit += 1
-            physical_page = self.TLB[virtual_page]
-            self.TLB.move_to_end(virtual_page)
+            physical_page = self.page_table[virtual_page]
+            self.page_table.move_to_end(virtual_page)
             print(f"{prettydir(virtual_page * 2**self.page_width, self.virtual_address_width, 0, self.page_width)} {prettytick} Virtual page 0x{virtual_page:0x} found at physical 0x{physical_page:0x}")
         
                 
             
     def get_physical_address(self, virtual_address):
         virtual_page = virtual_address >> self.page_width
-        physical_page = self.TLB[virtual_page]
+        physical_page = self.page_table[virtual_page]
         offset = virtual_address % (2**self.page_width)
         return (physical_page << self.page_width) + offset
     
@@ -156,11 +157,21 @@ class VirtualMemory:
     def show_state(self, only_stats = False):
         hits = self.statistics.line_hit
         total = self.statistics.line_hit + self.statistics.line_miss
-        printstr = f"{self.name}: Translations: [{Fore.GREEN}{hits}{Style.RESET_ALL}/{Fore.YELLOW}{total}{Style.RESET_ALL}] {prettydown}{self.statistics.line_pull} {prettyup}{self.statistics.line_evict} \nTLB: "
+        
+        hitrate = (hits / total) * 100  if total > 0 else 0
+        
+        print(f"{Fore.BLUE}{Back.GREEN}{self.name}{Style.RESET_ALL}")
+        printstr = f"Translations: {Fore.GREEN}{hits}{Style.RESET_ALL} hits out of {Fore.YELLOW}{total}{Style.RESET_ALL} requests ({hitrate:.2f} hit rate). {prettydown}{self.statistics.line_pull} pages pulled and {prettyup}{self.statistics.line_evict} pages swapped"
         numzeros_virt = (self.virtual_address_width - self.page_width + 3) // 4
         numzeros_phys = (self.address_width - self.page_width + 3) // 4
-        for entry in self.TLB.items():
-            printstr += f"[{Fore.RED}0x{entry[0]:0{numzeros_virt}x} {prettyright} {Fore.GREEN}0x{entry[1]:0{numzeros_phys}x}{Style.RESET_ALL}]"
+        if not only_stats:
+            printstr += f"\n{'-'*(numzeros_phys+numzeros_virt + 7)}\n"
+            
+            translations = []
+            for entry in self.page_table.items():
+                translations.append(f"{Fore.RED}0x{entry[0]:0{numzeros_virt}x} {prettyright} {Fore.GREEN}0x{entry[1]:0{numzeros_phys}x}{Style.RESET_ALL}")
+                
+            printstr += "\n".join(translations)
         
         print(printstr)        
         self.memory_system.show_state(only_stats)
@@ -218,9 +229,14 @@ class MemorySystem:
 
     def show_state(self, only_stats = False):
         for level in self.levels:
+            print(f"{Fore.BLUE}{Back.GREEN}{level.name}{Style.RESET_ALL}")
             if not only_stats:
                 print(level)
             level.show_statistics()
+            
+    def show_costs(self):
+        for level in self.levels:
+            print(f"{Fore.BLUE}{Back.GREEN}{level.name}{Style.RESET_ALL}")
             level.show_costs()
             
     #clear from bottom up
@@ -243,7 +259,7 @@ class CacheLine:
         self.valid = valid
         
     def prettyprint(self, tag_width):
-        return f"{prettydir(self.tag, tag_width, 0, 0, brackets = False)}{Fore.BLACK if not self.valid else Fore.GREEN}V{Style.RESET_ALL}{Fore.BLACK if not self.dirty else Fore.YELLOW}D{Style.RESET_ALL}"
+        return f"{Fore.BLACK if not self.valid else Fore.GREEN}V{Style.RESET_ALL}{Fore.BLACK if not self.dirty else Fore.YELLOW}D{Style.RESET_ALL} {prettydir(self.tag, tag_width, 0, 0, brackets = False)}"
     
         
 class CacheStatistics:
@@ -273,16 +289,24 @@ class CacheStatistics:
         self.line_pull = 0
         self.line_prefetch = 0
 
-    def get_statistics(self):
+    def get_statistics(self, show_wt = True, show_prefetch = True, show_victim = True):
         total_reads = self.read_hit + self.read_miss
         hitrate_read = float(self.read_hit) / float(total_reads) * 100.0 if total_reads > 0 else 0
         total_writes = self.write_hit + self.write_miss
         hitrate_write = float(self.write_hit) / float(total_writes) * 100.0 if total_writes > 0 else 0
-        return f'Reads: [{Fore.GREEN}{self.read_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_reads}{Style.RESET_ALL}]({hitrate_read:.2f}) Writes: [{Fore.GREEN}{self.write_hit}{Style.RESET_ALL}/{Fore.YELLOW}{total_writes}{Style.RESET_ALL}]({hitrate_write:.2f}) [{Fore.LIGHTMAGENTA_EX}{self.write_through}{Style.RESET_ALL}{prettyup}]' + \
-            f" [Blocks: {Fore.GREEN}{self.line_hit}{Style.RESET_ALL}/{Fore.RED}{self.line_miss} {prettydown}{self.line_pull}({prettydowndown}{self.line_prefetch}) {prettyup}{self.line_evict}]" + \
-            f" [Victim: {prettyswap}{self.victim_swap} {prettyright}{self.victim_push} {prettyupyellow}{self.victim_evict}]"
+        hit_width = math.ceil(math.log10(1+max(self.read_hit, self.write_hit, self.line_hit)))
+        mis_width = math.ceil(math.log10(1+max(self.read_miss, self.write_miss, self.line_miss)))
+        tot_width = math.ceil(math.log10(1+max(total_reads, total_writes)))
+        
+        wttext = f"[{Fore.LIGHTMAGENTA_EX}{self.write_through}{Style.RESET_ALL}{prettyup} written through]" if show_wt else ""
+        pftext = f"({prettydowndown}{self.line_prefetch} prefetched) " if show_prefetch else ""
+        vctext = f"\nVictim: {prettyswap}{self.victim_swap} swapped {prettyright}{self.victim_push} pushed to victim {prettyupyellow}{self.victim_evict} evicted from victim" if show_victim else ""
+        return f'Reads:  {Fore.GREEN}{self.read_hit:{hit_width}d}{Style.RESET_ALL} hits and {Fore.RED}{self.read_miss:{mis_width}d}{Style.RESET_ALL} misses out of {Fore.YELLOW}{total_reads:{tot_width}d}{Style.RESET_ALL} requests ({hitrate_read:.2f} hit rate) \n'+\
+            f'Writes: {Fore.GREEN}{self.write_hit:{hit_width}d}{Style.RESET_ALL} hits and {Fore.RED}{self.write_miss:{mis_width}d}{Style.RESET_ALL} misses out of {Fore.YELLOW}{total_writes:{tot_width}d}{Style.RESET_ALL} requests ({hitrate_write:.2f} hit rate) {wttext}\n' + \
+            f"Blocks: {Fore.GREEN}{self.line_hit:{hit_width}d}{Style.RESET_ALL} hits and {Fore.RED}{self.line_miss:{mis_width}d}{Style.RESET_ALL} misses. {prettydown}{self.line_pull} fetched {pftext}{prettyup}{self.line_evict} written back" + \
+            vctext
             
-    def get_cost(self):
+    def get_cost(self, show_through=False):
         total_hit = self.read_hit + self.write_hit
         cost_hit = total_hit * self.cost_hit
         total_miss = self.read_miss + self.write_miss
@@ -292,7 +316,8 @@ class CacheStatistics:
         total_through = self.write_through
         cost_through = total_through * self.cost_through
         total_cost = cost_access + cost_hit + cost_miss + cost_through
-        return f'Cost: [{Fore.YELLOW}{total_cost}{Style.RESET_ALL}] {prettyright} {Fore.YELLOW}{total_access}{Style.RESET_ALL} accesses: [{Fore.YELLOW}{cost_access}{Style.RESET_ALL}] | {Fore.GREEN}{total_hit}{Style.RESET_ALL} hits: [{Fore.YELLOW}{cost_hit}{Style.RESET_ALL}] | {Fore.RED}{total_miss}{Style.RESET_ALL} misses: [{Fore.YELLOW}{cost_miss}{Style.RESET_ALL}] | {Fore.BLUE}{total_through}{Style.RESET_ALL} through: [{Fore.YELLOW}{cost_through}{Style.RESET_ALL}]'
+        wttext = f". {Fore.BLUE}{total_through}{Style.RESET_ALL} write-through cost [{Fore.YELLOW}{cost_through}{Style.RESET_ALL}]" if show_through else ""
+        return f'Cost: [{Fore.YELLOW}{total_cost}{Style.RESET_ALL}] total cost, of which: {Fore.YELLOW}{total_access}{Style.RESET_ALL} accesses cost [{Fore.YELLOW}{cost_access}{Style.RESET_ALL}], {Fore.GREEN}{total_hit}{Style.RESET_ALL} hits cost [{Fore.YELLOW}{cost_hit}{Style.RESET_ALL}], and {Fore.RED}{total_miss}{Style.RESET_ALL} misses cost [{Fore.YELLOW}{cost_miss}{Style.RESET_ALL}]{wttext}'
 
 
 class MainMemory:
@@ -318,17 +343,17 @@ class MainMemory:
 
     def write(self, addr):
         self.statistics.write_hit += 1
-        print(f"{prettydir(addr, self.address_width, 0, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyup}( Block 0x{self.get_block(addr):0x} written to main memory")
+        print(f"{prettydir(addr, self.address_width, 0, self.line_size_width, virtualbits=self.virtual_address_width)} {prettyup} Block 0x{self.get_block(addr):0x} written to main memory")
         return True
 
     def write_line(self, line):
         return self.write(line.addr)
 
     def show_statistics(self):
-        print(f"{self.name}: {self.statistics.get_statistics()}")
+        print(f"{self.statistics.get_statistics(show_prefetch=False, show_victim=False, show_wt=False)}")
         
     def show_costs(self):
-        print(f"{self.name}: {self.statistics.get_cost()}")
+        print(f"{self.statistics.get_cost(show_through=False)}")
 
     def reset_statistics(self):
         self.statistics.reset()
@@ -601,19 +626,22 @@ class Cache:
         for (i, seti) in enumerate(self.set_data):
             linestr = []
             for line in seti:
-                #linestr.append(line.prettyprint(self.address_width - self.line_size_width - self.set_width))
                 hex_fmt = '0' + str((self.address_width + 3) // 4) + 'x'
-                base_addr = line.tag * (2**(self.line_size_width + self.set_width)) + i*2**self.line_size_width
-                high_addr = base_addr + 2**(self.line_size_width) - 1
-                linestr.append(('%s [' + Fore.YELLOW + '0x%s-0x%s' + Style.RESET_ALL + ']') % (line.prettyprint(self.address_width - self.line_size_width - self.set_width), format(base_addr, hex_fmt), format(high_addr, hex_fmt)))
+                base_addr = line.tag * (2**(self.line_size_width + self.set_width)) + i*2**self.line_size_width if line.valid else 0
+                high_addr = base_addr + 2**(self.line_size_width) - 1 if line.valid else 0
+                linestr.append(f"{line.prettyprint(self.address_width - self.line_size_width - self.set_width)}{prettydir(i << self.line_size_width, self.line_size_width + self.set_width, self.set_width, self.line_size_width, brackets=False)} [{Fore.YELLOW if line.valid else Fore.BLACK}0x{format(base_addr, hex_fmt)}-0x{format(high_addr, hex_fmt)}{Style.RESET_ALL}]")
 
-
-            setstr.append(f"{','.join(linestr)} {prettydir(i << self.line_size_width, self.line_size_width + self.set_width, self.set_width, self.line_size_width)}")
+            setstr.append("\n".join(linestr))
+            
+        printwidth = (11+self.address_width+2*((self.address_width + 3) // 4))
+        #indent = (printwidth - len(self.name)) // 2
+        #{' '*indent}{self.name}\n
+        title = f"{'-'*printwidth}\n"
                         
         if self.victim:
-            return "\n".join(setstr) + "\n" + str(self.victim)
+            return title + "\n".join(setstr) + "\nVictim\n" + str(self.victim)
         else:
-            return "\n".join(setstr)
+            return title + "\n".join(setstr)
         
     def clear(self, address_low, address_high):
         if self.victim is not None:
@@ -646,10 +674,10 @@ class Cache:
         self._write(address, dirty=False) #no questions asked above. When calling this function address should not be in this memory
 
     def show_statistics(self):
-        print(f"{self.name}: {self.statistics.get_statistics()}")
+        print(f"{self.statistics.get_statistics(show_prefetch=self.prefetch, show_victim=self.victim is not None, show_wt=not self.write_allocate)}")
     
     def show_costs(self):
-        print(f"{self.name}: {self.statistics.get_cost()}")
+        print(f"{self.statistics.get_cost(show_through=not self.write_allocate)}")
 
     def reset_statistics(self):
         self.statistics.reset()
@@ -753,7 +781,11 @@ class Cacheasy(cmd2.Cmd):
         print(f"Prefetch blocks: {self.prefetch}")
 
     def do_show_state(self, args):
+        print(f"{Fore.GREEN}{Back.BLUE}Memory State{Style.RESET_ALL}")
         self.memsys.show_state(only_stats=args == "stats")
+        
+    def do_show_costs(self, args):
+        self.memsys.show_costs()
 
     def parseint(self, oldval, args, name=""):
         try:
