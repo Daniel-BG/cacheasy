@@ -13,7 +13,7 @@ app('prefetch 0', echo=True)
 app('cache', echo=True)
 app('cost_hit 1', echo=True)
 app('cost_miss 200', echo=True)
-app('cost_through 200', echo=True)
+app('cost_through 50', echo=True)
 app('reset_stats', echo=True)
 for i in range(128):
     if (i > 7 and i < 64):
